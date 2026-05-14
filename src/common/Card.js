@@ -53,6 +53,7 @@ class Card {
     this.animations = true;
     this.a11yTitle = "";
     this.a11yDesc = "";
+    this.useExtendedViewBox = true;
   }
 
   /**
@@ -206,10 +207,9 @@ class Card {
    * @returns {string} The rendered card.
    */
   render(body) {
-    // Extended viewBox to show xiaohei peeking from outside the card
-    const viewBoxPadding = 60;
-    const verticalOffset = 5; // Card shifted down by 5px
-    const bottomPadding = 10; // Small padding at bottom
+    const viewBoxPadding = this.useExtendedViewBox ? 60 : 0;
+    const verticalOffset = this.useExtendedViewBox ? 5 : 0;
+    const bottomPadding = this.useExtendedViewBox ? 10 : 0;
     return `
       <svg
         width="${this.width + viewBoxPadding * 2}"
