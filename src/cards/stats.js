@@ -296,6 +296,7 @@ const renderStatsCard = (stats, options = {}) => {
     disable_animations = false,
     rank_icon = "default",
     show = [],
+    hide_xiaohei = false,
   } = options;
 
   const lheight = parseInt(String(line_height), 10);
@@ -523,6 +524,10 @@ const renderStatsCard = (stats, options = {}) => {
   card.setHideTitle(hide_title);
   card.setCSS(cssStyles);
 
+  if (hide_xiaohei) {
+    card.useExtendedViewBox = false;
+  }
+
   if (disable_animations) {
     card.disableAnimations();
   }
@@ -587,35 +592,36 @@ const renderStatsCard = (stats, options = {}) => {
     desc: labels,
   });
 
-  // Render xiaohei image - positioned at top-left corner, peeking from outside
-  const xiaoheiImage = getXiaoheiImage();
-  // Adjust y position based on theme (dark themes need slight adjustment)
-  const isDarkTheme = theme && [
-    "dark", "radical", "merko", "gruvbox", "tokyonight", "onedark", 
-    "cobalt", "synthwave", "highcontrast", "dracula", "prussian",
-    "monokai", "vue", "vue-dark", "shades-of-purple", "nightowl",
-    "buefy", "blue-green", "algolia", "great-gatsby", "darcula",
-    "bear", "solarized-dark", "solarized-light", "chartreuse-dark",
-    "nord", "gotham", "material-palenight", "graywhite", "vision-friendly-dark",
-    "ayu-mirage", "midnight-purple", "calm", "flag-india", "omni",
-    "react", "jolly", "maroongold", "yeblu", "blueberry",
-    "slateorange", "kacho_ga", "outrun", "ocean_dark", "city_lights",
-    "github_dark", "discord_old_blurple", "aura_dark", "panda",
-    "noctis_minimus", "cobalt2", "swift", "aura", "apprentice",
-    "moltack", "codeSTACKr", "rose_pine"
-  ].includes(theme.toLowerCase());
-  const xiaoheiYPos = isDarkTheme ? "-121" : "-123";
-  const xiaoheiElement = xiaoheiImage
-    ? `<image 
-        x="-15" 
-        y="${xiaoheiYPos}" 
-        width="190" 
-        height="90" 
-        href="${xiaoheiImage}"
-        opacity="0.95"
-        style="animation: fadeInAnimation 0.8s ease-in-out forwards;"
-      />`
-    : "";
+  let xiaoheiElement = "";
+  if (!hide_xiaohei) {
+    const xiaoheiImage = getXiaoheiImage();
+    const isDarkTheme = theme && [
+      "dark", "radical", "merko", "gruvbox", "tokyonight", "onedark", 
+      "cobalt", "synthwave", "highcontrast", "dracula", "prussian",
+      "monokai", "vue", "vue-dark", "shades-of-purple", "nightowl",
+      "buefy", "blue-green", "algolia", "great-gatsby", "darcula",
+      "bear", "solarized-dark", "solarized-light", "chartreuse-dark",
+      "nord", "gotham", "material-palenight", "graywhite", "vision-friendly-dark",
+      "ayu-mirage", "midnight-purple", "calm", "flag-india", "omni",
+      "react", "jolly", "maroongold", "yeblu", "blueberry",
+      "slateorange", "kacho_ga", "outrun", "ocean_dark", "city_lights",
+      "github_dark", "discord_old_blurple", "aura_dark", "panda",
+      "noctis_minimus", "cobalt2", "swift", "aura", "apprentice",
+      "moltack", "codeSTACKr", "rose_pine"
+    ].includes(theme.toLowerCase());
+    const xiaoheiYPos = isDarkTheme ? "-121" : "-123";
+    xiaoheiElement = xiaoheiImage
+      ? `<image 
+          x="-15" 
+          y="${xiaoheiYPos}" 
+          width="190" 
+          height="90" 
+          href="${xiaoheiImage}"
+          opacity="0.95"
+          style="animation: fadeInAnimation 0.8s ease-in-out forwards;"
+        />`
+      : "";
+  }
 
   return card.render(`
     ${rankCircle}
