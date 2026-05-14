@@ -244,7 +244,7 @@ class Card {
 
         ${this.renderGradient()}
 
-        <g transform="translate(0, 5)">
+        <g transform="translate(0, ${verticalOffset})">
           <rect
             data-testid="card-bg"
             x="0.5"
