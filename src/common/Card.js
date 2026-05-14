@@ -245,6 +245,7 @@ class Card {
         ${this.renderGradient()}
 
         <g transform="translate(0, ${verticalOffset})">
+          ${this.useExtendedViewBox ? "" : `<rect x="0" y="0" width="${this.width}" height="${this.height}" fill="${typeof this.colors.bgColor === "object" ? "url(#gradient)" : this.colors.bgColor}" />`}
           <rect
             data-testid="card-bg"
             x="0.5"
