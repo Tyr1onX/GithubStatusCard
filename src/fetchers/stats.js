@@ -39,7 +39,7 @@ const GRAPHQL_REPOS_QUERY = `
 `;
 
 const GRAPHQL_STATS_QUERY = `
-  query userInfo($login: String!, $after: String, $includeMergedPullRequests: Boolean!, $includeDiscussions: Boolean!, $includeDiscussionsAnswers: Boolean!, $startTime: DateTime = null) {
+  query userInfo($login: String!, $after: String, $includeMergedPullRequests: Boolean!, $includeDiscussions: Boolean!, $includeDiscussionsAnswers: Boolean!, $includeContributedTo: Boolean!, $startTime: DateTime = null) {
     user(login: $login) {
       name
       login
@@ -49,7 +49,7 @@ const GRAPHQL_STATS_QUERY = `
       reviews: contributionsCollection {
         totalPullRequestReviewContributions
       }
-      repositoriesContributedTo(first: 1, contributionTypes: [COMMIT, ISSUE, PULL_REQUEST, REPOSITORY]) {
+      repositoriesContributedTo(first: 1, contributionTypes: [COMMIT, ISSUE, PULL_REQUEST, REPOSITORY]) @include(if: $includeContributedTo) {
         totalCount
       }
       pullRequests(first: 1) {
@@ -77,6 +77,26 @@ const GRAPHQL_STATS_QUERY = `
     }
   }
 `;
+
+/**
+ * Whether a GraphQL error is only about repositoriesContributedTo resource limits.
+ * GitHub may reject that field for high-activity users even with first: 1.
+ *
+ * @param {any[]|undefined} errors GraphQL errors array.
+ * @returns {boolean}
+ */
+const isContributedToResourceLimitError = (errors) => {
+  if (!Array.isArray(errors) || errors.length === 0) {
+    return false;
+  }
+  return errors.every((error) => {
+    if (error?.type !== "RESOURCE_LIMITS_EXCEEDED") {
+      return false;
+    }
+    const path = Array.isArray(error.path) ? error.path : [];
+    return path.includes("repositoriesContributedTo");
+  });
+};
 
 /**
  * Stats fetcher object.
@@ -121,6 +141,8 @@ const statsFetcher = async ({
   let stats;
   let hasNextPage = true;
   let endCursor = null;
+  // Prefer the contributed-to count, but fall back if GitHub rejects the field.
+  let includeContributedTo = true;
   while (hasNextPage) {
     const variables = {
       login: username,
@@ -129,11 +151,39 @@ const statsFetcher = async ({
       includeMergedPullRequests,
       includeDiscussions,
       includeDiscussionsAnswers,
+      includeContributedTo,
       startTime,
     };
     let res = await retryer(fetcher, variables);
+
+    // Retry without repositoriesContributedTo when GitHub hits resource limits
+    // on that field (common for busy accounts; rest of the card can still render).
+    if (
+      includeContributedTo &&
+      !endCursor &&
+      isContributedToResourceLimitError(res.data.errors)
+    ) {
+      logger.log(
+        "repositoriesContributedTo hit RESOURCE_LIMITS_EXCEEDED; retrying without it",
+      );
+      includeContributedTo = false;
+      variables.includeContributedTo = false;
+      res = await retryer(fetcher, variables);
+    }
+
     if (res.data.errors) {
-      return res;
+      // Partial success: field-level limit with usable user payload.
+      if (
+        isContributedToResourceLimitError(res.data.errors) &&
+        res.data.data?.user
+      ) {
+        delete res.data.errors;
+        if (res.data.data.user.repositoriesContributedTo == null) {
+          res.data.data.user.repositoriesContributedTo = { totalCount: 0 };
+        }
+      } else {
+        return res;
+      }
     }
 
     // Store stats data.
@@ -318,7 +368,7 @@ const fetchStats = async (
     stats.totalDiscussionsAnswered =
       user.repositoryDiscussionComments.totalCount;
   }
-  stats.contributedTo = user.repositoriesContributedTo.totalCount;
+  stats.contributedTo = user.repositoriesContributedTo?.totalCount ?? 0;
 
   // Retrieve stars while filtering out repositories to be hidden.
   const allExcludedRepos = [...exclude_repo, ...excludeRepositories];

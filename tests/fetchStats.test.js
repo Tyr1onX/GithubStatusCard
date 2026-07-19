@@ -201,6 +201,78 @@ describe("Test fetchStats", () => {
     );
   });
 
+  it("should recover when repositoriesContributedTo hits resource limits", async () => {
+    mock.reset();
+    const limitError = {
+      data: {
+        user: null,
+      },
+      errors: [
+        {
+          type: "RESOURCE_LIMITS_EXCEEDED",
+          path: ["user", "repositoriesContributedTo"],
+          locations: [{ line: 1, column: 1 }],
+          message: "Resource limits for this query exceeded.",
+        },
+      ],
+    };
+    const dataWithoutContributedTo = JSON.parse(JSON.stringify(data_stats));
+    delete dataWithoutContributedTo.data.user.repositoriesContributedTo;
+
+    mock
+      .onPost("https://api.github.com/graphql")
+      .replyOnce(200, limitError)
+      .onPost("https://api.github.com/graphql")
+      .replyOnce(200, dataWithoutContributedTo);
+
+    let stats = await fetchStats("anuraghazra");
+    const rank = calculateRank({
+      all_commits: false,
+      commits: 100,
+      prs: 300,
+      reviews: 50,
+      issues: 200,
+      repos: 5,
+      stars: 300,
+      followers: 100,
+    });
+
+    expect(stats).toStrictEqual({
+      contributedTo: 0,
+      name: "Anurag Hazra",
+      totalCommits: 100,
+      totalIssues: 200,
+      totalPRs: 300,
+      totalPRsMerged: 0,
+      mergedPRsPercentage: 0,
+      totalReviews: 50,
+      totalStars: 300,
+      totalDiscussionsStarted: 0,
+      totalDiscussionsAnswered: 0,
+      rank,
+    });
+  });
+
+  it("should continue when repositoriesContributedTo is null with partial errors", async () => {
+    mock.reset();
+    const partial = JSON.parse(JSON.stringify(data_stats));
+    partial.data.user.repositoriesContributedTo = null;
+    partial.errors = [
+      {
+        type: "RESOURCE_LIMITS_EXCEEDED",
+        path: ["user", "repositoriesContributedTo"],
+        locations: [{ line: 1, column: 1 }],
+        message: "Resource limits for this query exceeded.",
+      },
+    ];
+    mock.onPost("https://api.github.com/graphql").reply(200, partial);
+
+    let stats = await fetchStats("anuraghazra");
+    expect(stats.contributedTo).toBe(0);
+    expect(stats.name).toBe("Anurag Hazra");
+    expect(stats.totalPRs).toBe(300);
+  });
+
   it("should fetch total commits", async () => {
     mock
       .onGet("https://api.github.com/search/commits?q=author:anuraghazra")
