@@ -38,8 +38,11 @@ const GRAPHQL_REPOS_QUERY = `
   }
 `;
 
+// Main stats query deliberately omits repositoriesContributedTo.
+// That field has high GraphQL node cost and fails with RESOURCE_LIMITS_EXCEEDED
+// for high-activity accounts; fetching it separately keeps the card fast/reliable.
 const GRAPHQL_STATS_QUERY = `
-  query userInfo($login: String!, $after: String, $includeMergedPullRequests: Boolean!, $includeDiscussions: Boolean!, $includeDiscussionsAnswers: Boolean!, $includeContributedTo: Boolean!, $startTime: DateTime = null) {
+  query userInfo($login: String!, $after: String, $includeMergedPullRequests: Boolean!, $includeDiscussions: Boolean!, $includeDiscussionsAnswers: Boolean!, $startTime: DateTime = null) {
     user(login: $login) {
       name
       login
@@ -48,9 +51,6 @@ const GRAPHQL_STATS_QUERY = `
       }
       reviews: contributionsCollection {
         totalPullRequestReviewContributions
-      }
-      repositoriesContributedTo(first: 1, contributionTypes: [COMMIT, ISSUE, PULL_REQUEST, REPOSITORY]) @include(if: $includeContributedTo) {
-        totalCount
       }
       pullRequests(first: 1) {
         totalCount
@@ -78,23 +78,83 @@ const GRAPHQL_STATS_QUERY = `
   }
 `;
 
-/**
- * Whether a GraphQL error is only about repositoriesContributedTo resource limits.
- * GitHub may reject that field for high-activity users even with first: 1.
- *
- * @param {any[]|undefined} errors GraphQL errors array.
- * @returns {boolean}
- */
-const isContributedToResourceLimitError = (errors) => {
-  if (!Array.isArray(errors) || errors.length === 0) {
-    return false;
-  }
-  return errors.every((error) => {
-    if (error?.type !== "RESOURCE_LIMITS_EXCEEDED") {
-      return false;
+// Canonical "Contributed to" count (unique repos). Isolated so failures never
+// take down the main stats query.
+const GRAPHQL_CONTRIBUTED_TO_QUERY = `
+  query contributedToCount($login: String!) {
+    user(login: $login) {
+      repositoriesContributedTo(
+        first: 1
+        contributionTypes: [COMMIT, ISSUE, PULL_REQUEST, REPOSITORY]
+      ) {
+        totalCount
+      }
     }
-    const path = Array.isArray(error.path) ? error.path : [];
-    return path.includes("repositoriesContributedTo");
+  }
+`;
+
+// Cheaper fallback when the canonical field is rejected. Year-scoped and
+// commit-only — not identical semantics, but better than blanking the metric.
+const GRAPHQL_CONTRIBUTED_TO_FALLBACK_QUERY = `
+  query contributedToFallback($login: String!) {
+    user(login: $login) {
+      contributionsCollection {
+        totalRepositoriesWithContributedCommits
+      }
+    }
+  }
+`;
+
+/** @type {Map<string, { value: number, exact: boolean, expiresAt: number }>} */
+const contributedToCache = new Map();
+
+const DEFAULT_CONTRIBUTED_TO_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+
+/**
+ * @returns {number} Cache TTL in ms for contributed-to counts.
+ */
+const getContributedToCacheTtlMs = () => {
+  const fromEnv = parseInt(process.env.CONTRIBUTED_TO_CACHE_TTL_MS || "", 10);
+  if (!isNaN(fromEnv) && fromEnv > 0) {
+    return fromEnv;
+  }
+  return DEFAULT_CONTRIBUTED_TO_CACHE_TTL_MS;
+};
+
+/**
+ * Clear contributed-to cache (tests).
+ */
+const clearContributedToCache = () => {
+  contributedToCache.clear();
+};
+
+/**
+ * @param {string} username
+ * @returns {{ value: number, exact: boolean } | null}
+ */
+const readContributedToCache = (username) => {
+  const key = username.toLowerCase();
+  const hit = contributedToCache.get(key);
+  if (!hit) {
+    return null;
+  }
+  if (Date.now() > hit.expiresAt) {
+    contributedToCache.delete(key);
+    return null;
+  }
+  return { value: hit.value, exact: hit.exact };
+};
+
+/**
+ * @param {string} username
+ * @param {number} value
+ * @param {boolean} exact
+ */
+const writeContributedToCache = (username, value, exact) => {
+  contributedToCache.set(username.toLowerCase(), {
+    value,
+    exact,
+    expiresAt: Date.now() + getContributedToCacheTtlMs(),
   });
 };
 
@@ -116,6 +176,91 @@ const fetcher = (variables, token) => {
       Authorization: `bearer ${token}`,
     },
   );
+};
+
+/**
+ * @param {object} variables
+ * @param {string} token
+ * @returns {Promise<import('axios').AxiosResponse>}
+ */
+const contributedToExactFetcher = (variables, token) =>
+  request(
+    {
+      query: GRAPHQL_CONTRIBUTED_TO_QUERY,
+      variables: { login: variables.login },
+    },
+    { Authorization: `bearer ${token}` },
+  );
+
+/**
+ * @param {object} variables
+ * @param {string} token
+ * @returns {Promise<import('axios').AxiosResponse>}
+ */
+const contributedToFallbackFetcher = (variables, token) =>
+  request(
+    {
+      query: GRAPHQL_CONTRIBUTED_TO_FALLBACK_QUERY,
+      variables: { login: variables.login },
+    },
+    { Authorization: `bearer ${token}` },
+  );
+
+/**
+ * Fetch unique "repositories contributed to" with cache + fallbacks.
+ * Prefer exact GraphQL totalCount; on RESOURCE_LIMITS_EXCEEDED use cache then
+ * year-scoped commit-repo count.
+ *
+ * @param {string} username
+ * @returns {Promise<number>}
+ */
+const fetchContributedToCount = async (username) => {
+  const cached = readContributedToCache(username);
+  if (cached) {
+    return cached.value;
+  }
+
+  try {
+    const exactRes = await retryer(contributedToExactFetcher, {
+      login: username,
+    });
+    const errors = exactRes.data?.errors;
+    const total =
+      exactRes.data?.data?.user?.repositoriesContributedTo?.totalCount;
+
+    if (!errors && typeof total === "number") {
+      writeContributedToCache(username, total, true);
+      return total;
+    }
+
+    // Field-level limit or other soft failure → keep going.
+    logger.log(
+      `contributedTo exact query failed for ${username}: ${JSON.stringify(
+        errors?.[0] || "unknown",
+      )}`,
+    );
+  } catch (err) {
+    logger.log(`contributedTo exact query threw for ${username}: ${err}`);
+  }
+
+  // Stale cache is already handled above; try cheaper fallback metric.
+  try {
+    const fallbackRes = await retryer(contributedToFallbackFetcher, {
+      login: username,
+    });
+    const fallback =
+      fallbackRes.data?.data?.user?.contributionsCollection
+        ?.totalRepositoriesWithContributedCommits;
+    if (!fallbackRes.data?.errors && typeof fallback === "number") {
+      // Cache approximate value with shorter integrity flag; still useful.
+      writeContributedToCache(username, fallback, false);
+      return fallback;
+    }
+  } catch (err) {
+    logger.log(`contributedTo fallback threw for ${username}: ${err}`);
+  }
+
+  return 0;
 };
 
 /**
@@ -141,8 +286,6 @@ const statsFetcher = async ({
   let stats;
   let hasNextPage = true;
   let endCursor = null;
-  // Prefer the contributed-to count, but fall back if GitHub rejects the field.
-  let includeContributedTo = true;
   while (hasNextPage) {
     const variables = {
       login: username,
@@ -151,39 +294,11 @@ const statsFetcher = async ({
       includeMergedPullRequests,
       includeDiscussions,
       includeDiscussionsAnswers,
-      includeContributedTo,
       startTime,
     };
     let res = await retryer(fetcher, variables);
-
-    // Retry without repositoriesContributedTo when GitHub hits resource limits
-    // on that field (common for busy accounts; rest of the card can still render).
-    if (
-      includeContributedTo &&
-      !endCursor &&
-      isContributedToResourceLimitError(res.data.errors)
-    ) {
-      logger.log(
-        "repositoriesContributedTo hit RESOURCE_LIMITS_EXCEEDED; retrying without it",
-      );
-      includeContributedTo = false;
-      variables.includeContributedTo = false;
-      res = await retryer(fetcher, variables);
-    }
-
     if (res.data.errors) {
-      // Partial success: field-level limit with usable user payload.
-      if (
-        isContributedToResourceLimitError(res.data.errors) &&
-        res.data.data?.user
-      ) {
-        delete res.data.errors;
-        if (res.data.data.user.repositoriesContributedTo == null) {
-          res.data.data.user.repositoriesContributedTo = { totalCount: 0 };
-        }
-      } else {
-        return res;
-      }
+      return res;
     }
 
     // Store stats data.
@@ -225,7 +340,7 @@ const fetchTotalCommits = (variables, token) => {
   if (variables.year) {
     query += ` committer-date:${variables.year}-01-01..${variables.year}-12-31`;
   }
-  
+
   return axios({
     method: "get",
     url: `https://api.github.com/search/commits?q=${encodeURIComponent(query)}`,
@@ -261,8 +376,8 @@ const totalCommitsFetcher = async (username, year) => {
     throw new Error(err);
   }
 
-  const totalCount = res.data.total_count;
-  if (!totalCount || isNaN(totalCount)) {
+  const totalCount = res?.data?.total_count;
+  if (totalCount == null || isNaN(totalCount)) {
     throw new CustomError(
       "Could not fetch total commits.",
       CustomError.GITHUB_REST_API_ERROR,
@@ -311,13 +426,17 @@ const fetchStats = async (
     rank: { level: "C", percentile: 100 },
   };
 
-  let res = await statsFetcher({
-    username,
-    includeMergedPullRequests: include_merged_pull_requests,
-    includeDiscussions: include_discussions,
-    includeDiscussionsAnswers: include_discussions_answers,
-    startTime: commits_year ? `${commits_year}-01-01T00:00:00Z` : undefined,
-  });
+  // Main stats and contributed-to run in parallel for latency.
+  const [res, contributedTo] = await Promise.all([
+    statsFetcher({
+      username,
+      includeMergedPullRequests: include_merged_pull_requests,
+      includeDiscussions: include_discussions,
+      includeDiscussionsAnswers: include_discussions_answers,
+      startTime: commits_year ? `${commits_year}-01-01T00:00:00Z` : undefined,
+    }),
+    fetchContributedToCount(username),
+  ]);
 
   // Catch GraphQL errors.
   if (res.data.errors) {
@@ -368,7 +487,7 @@ const fetchStats = async (
     stats.totalDiscussionsAnswered =
       user.repositoryDiscussionComments.totalCount;
   }
-  stats.contributedTo = user.repositoriesContributedTo?.totalCount ?? 0;
+  stats.contributedTo = contributedTo;
 
   // Retrieve stars while filtering out repositories to be hidden.
   const allExcludedRepos = [...exclude_repo, ...excludeRepositories];
@@ -396,5 +515,5 @@ const fetchStats = async (
   return stats;
 };
 
-export { fetchStats };
+export { fetchStats, clearContributedToCache };
 export default fetchStats;

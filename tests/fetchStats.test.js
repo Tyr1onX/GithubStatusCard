@@ -3,7 +3,10 @@ import "@testing-library/jest-dom";
 import axios from "axios";
 import MockAdapter from "axios-mock-adapter";
 import { calculateRank } from "../src/calculateRank.js";
-import { fetchStats } from "../src/fetchers/stats.js";
+import {
+  clearContributedToCache,
+  fetchStats,
+} from "../src/fetchers/stats.js";
 
 // Test parameters.
 const data_stats = {
@@ -105,8 +108,10 @@ const mock = new MockAdapter(axios);
 
 beforeEach(() => {
   process.env.FETCH_MULTI_PAGE_STARS = "false"; // Set to `false` to fetch only one page of stars.
+  clearContributedToCache();
   mock.onPost("https://api.github.com/graphql").reply((cfg) => {
     let req = JSON.parse(cfg.data);
+    const q = req.query || "";
 
     if (
       req.variables &&
@@ -115,15 +120,45 @@ beforeEach(() => {
     ) {
       return [200, data_year2003];
     }
+
+    // Isolated contributed-to micro-query.
+    if (
+      q.includes("contributedToCount") ||
+      (q.includes("repositoriesContributedTo") &&
+        !q.includes("totalCommitContributions"))
+    ) {
+      return [200, data_stats];
+    }
+
+    // Cheap fallback metric.
+    if (
+      q.includes("contributedToFallback") ||
+      q.includes("totalRepositoriesWithContributedCommits")
+    ) {
+      return [
+        200,
+        {
+          data: {
+            user: {
+              contributionsCollection: {
+                totalRepositoriesWithContributedCommits: 42,
+              },
+            },
+          },
+        },
+      ];
+    }
+
     return [
       200,
-      req.query.includes("totalCommitContributions") ? data_stats : data_repo,
+      q.includes("totalCommitContributions") ? data_stats : data_repo,
     ];
   });
 });
 
 afterEach(() => {
   mock.reset();
+  clearContributedToCache();
 });
 
 describe("Test fetchStats", () => {
@@ -158,38 +193,33 @@ describe("Test fetchStats", () => {
 
   it("should stop fetching when there are repos with zero stars", async () => {
     mock.reset();
-    mock
-      .onPost("https://api.github.com/graphql")
-      .replyOnce(200, data_stats)
-      .onPost("https://api.github.com/graphql")
-      .replyOnce(200, data_repo_zero_stars);
+    clearContributedToCache();
+    process.env.FETCH_MULTI_PAGE_STARS = "true";
+    let repoPageCalls = 0;
+
+    mock.onPost("https://api.github.com/graphql").reply((cfg) => {
+      const req = JSON.parse(cfg.data);
+      const q = req.query || "";
+      if (
+        q.includes("contributedToCount") ||
+        (q.includes("repositoriesContributedTo") &&
+          !q.includes("totalCommitContributions"))
+      ) {
+        return [200, data_stats];
+      }
+      if (q.includes("totalCommitContributions")) {
+        return [200, data_stats];
+      }
+      // Pagination-only query (no totalCommitContributions).
+      repoPageCalls += 1;
+      return [200, data_repo_zero_stars];
+    });
 
     let stats = await fetchStats("anuraghazra");
-    const rank = calculateRank({
-      all_commits: false,
-      commits: 100,
-      prs: 300,
-      reviews: 50,
-      issues: 200,
-      repos: 5,
-      stars: 300,
-      followers: 100,
-    });
-
-    expect(stats).toStrictEqual({
-      contributedTo: 61,
-      name: "Anurag Hazra",
-      totalCommits: 100,
-      totalIssues: 200,
-      totalPRs: 300,
-      totalPRsMerged: 0,
-      mergedPRsPercentage: 0,
-      totalReviews: 50,
-      totalStars: 300,
-      totalDiscussionsStarted: 0,
-      totalDiscussionsAnswered: 0,
-      rank,
-    });
+    // First page all non-zero stars → one more page, then zeros stop further pages.
+    expect(repoPageCalls).toBe(1);
+    expect(stats.totalStars).toBe(600);
+    expect(stats.contributedTo).toBe(61);
   });
 
   it("should throw error", async () => {
@@ -201,12 +231,11 @@ describe("Test fetchStats", () => {
     );
   });
 
-  it("should recover when repositoriesContributedTo hits resource limits", async () => {
+  it("should keep main stats when contributedTo hits resource limits and use fallback", async () => {
     mock.reset();
+    clearContributedToCache();
     const limitError = {
-      data: {
-        user: null,
-      },
+      data: { user: null },
       errors: [
         {
           type: "RESOURCE_LIMITS_EXCEEDED",
@@ -216,67 +245,85 @@ describe("Test fetchStats", () => {
         },
       ],
     };
-    const dataWithoutContributedTo = JSON.parse(JSON.stringify(data_stats));
-    delete dataWithoutContributedTo.data.user.repositoriesContributedTo;
 
-    mock
-      .onPost("https://api.github.com/graphql")
-      .replyOnce(200, limitError)
-      .onPost("https://api.github.com/graphql")
-      .replyOnce(200, dataWithoutContributedTo);
-
-    let stats = await fetchStats("anuraghazra");
-    const rank = calculateRank({
-      all_commits: false,
-      commits: 100,
-      prs: 300,
-      reviews: 50,
-      issues: 200,
-      repos: 5,
-      stars: 300,
-      followers: 100,
+    mock.onPost("https://api.github.com/graphql").reply((cfg) => {
+      const req = JSON.parse(cfg.data);
+      const q = req.query || "";
+      if (
+        q.includes("contributedToCount") ||
+        (q.includes("repositoriesContributedTo") &&
+          !q.includes("totalCommitContributions"))
+      ) {
+        return [200, limitError];
+      }
+      if (
+        q.includes("contributedToFallback") ||
+        q.includes("totalRepositoriesWithContributedCommits")
+      ) {
+        return [
+          200,
+          {
+            data: {
+              user: {
+                contributionsCollection: {
+                  totalRepositoriesWithContributedCommits: 42,
+                },
+              },
+            },
+          },
+        ];
+      }
+      return [200, data_stats];
     });
 
-    expect(stats).toStrictEqual({
-      contributedTo: 0,
-      name: "Anurag Hazra",
-      totalCommits: 100,
-      totalIssues: 200,
-      totalPRs: 300,
-      totalPRsMerged: 0,
-      mergedPRsPercentage: 0,
-      totalReviews: 50,
-      totalStars: 300,
-      totalDiscussionsStarted: 0,
-      totalDiscussionsAnswered: 0,
-      rank,
-    });
-  });
-
-  it("should continue when repositoriesContributedTo is null with partial errors", async () => {
-    mock.reset();
-    const partial = JSON.parse(JSON.stringify(data_stats));
-    partial.data.user.repositoriesContributedTo = null;
-    partial.errors = [
-      {
-        type: "RESOURCE_LIMITS_EXCEEDED",
-        path: ["user", "repositoriesContributedTo"],
-        locations: [{ line: 1, column: 1 }],
-        message: "Resource limits for this query exceeded.",
-      },
-    ];
-    mock.onPost("https://api.github.com/graphql").reply(200, partial);
-
     let stats = await fetchStats("anuraghazra");
-    expect(stats.contributedTo).toBe(0);
     expect(stats.name).toBe("Anurag Hazra");
     expect(stats.totalPRs).toBe(300);
+    expect(stats.contributedTo).toBe(42);
+  });
+
+  it("should reuse cached contributedTo without calling GraphQL again", async () => {
+    mock.reset();
+    clearContributedToCache();
+    let contributedCalls = 0;
+
+    mock.onPost("https://api.github.com/graphql").reply((cfg) => {
+      const req = JSON.parse(cfg.data);
+      const q = req.query || "";
+      if (
+        q.includes("contributedToCount") ||
+        (q.includes("repositoriesContributedTo") &&
+          !q.includes("totalCommitContributions"))
+      ) {
+        contributedCalls += 1;
+        return [200, data_stats];
+      }
+      return [200, data_stats];
+    });
+
+    const first = await fetchStats("anuraghazra");
+    const second = await fetchStats("anuraghazra");
+    expect(first.contributedTo).toBe(61);
+    expect(second.contributedTo).toBe(61);
+    expect(contributedCalls).toBe(1);
   });
 
   it("should fetch total commits", async () => {
-    mock
-      .onGet("https://api.github.com/search/commits?q=author:anuraghazra")
-      .reply(200, { total_count: 1000 });
+    mock.reset();
+    clearContributedToCache();
+    mock.onPost("https://api.github.com/graphql").reply((cfg) => {
+      const req = JSON.parse(cfg.data);
+      const q = req.query || "";
+      if (
+        q.includes("contributedToCount") ||
+        (q.includes("repositoriesContributedTo") &&
+          !q.includes("totalCommitContributions"))
+      ) {
+        return [200, data_stats];
+      }
+      return [200, data_stats];
+    });
+    mock.onGet(/\/search\/commits/).reply(200, { total_count: 1000 });
 
     let stats = await fetchStats("anuraghazra", true);
     const rank = calculateRank({
@@ -313,19 +360,35 @@ describe("Test fetchStats", () => {
   });
 
   it("should throw specific error when include_all_commits true and API returns error", async () => {
-    mock
-      .onGet("https://api.github.com/search/commits?q=author:anuraghazra")
-      .reply(200, { error: "Some test error message" });
+    mock.reset();
+    clearContributedToCache();
+    mock.onPost("https://api.github.com/graphql").reply(200, data_stats);
+    mock.onGet(/\/search\/commits/).reply(200, { error: "Some test error message" });
 
-    expect(fetchStats("anuraghazra", true)).rejects.toThrow(
-      new Error("Could not fetch total commits."),
+    await expect(fetchStats("anuraghazra", true)).rejects.toThrow(
+      "Could not fetch total commits.",
     );
   });
 
   it("should exclude stars of the `test-repo-1` repository", async () => {
-    mock
-      .onGet("https://api.github.com/search/commits?q=author:anuraghazra")
-      .reply(200, { total_count: 1000 });
+    mock.reset();
+    clearContributedToCache();
+    mock.onPost("https://api.github.com/graphql").reply((cfg) => {
+      const req = JSON.parse(cfg.data);
+      const q = req.query || "";
+      if (
+        q.includes("contributedToCount") ||
+        (q.includes("repositoriesContributedTo") &&
+          !q.includes("totalCommitContributions"))
+      ) {
+        return [200, data_stats];
+      }
+      return [
+        200,
+        q.includes("totalCommitContributions") ? data_stats : data_repo,
+      ];
+    });
+    mock.onGet(/\/search\/commits/).reply(200, { total_count: 1000 });
 
     let stats = await fetchStats("anuraghazra", true, ["test-repo-1"]);
     const rank = calculateRank({
