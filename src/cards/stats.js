@@ -237,10 +237,10 @@ const getStyles = ({
  * @returns {string} The label corresponding to the options.
  */
 const getTotalCommitsYearLabel = (include_all_commits, commits_year, i18n) =>
-  include_all_commits
-    ? ""
-    : commits_year
-      ? ` (${commits_year})`
+  commits_year
+    ? ` (${commits_year})`
+    : include_all_commits
+      ? ""
       : ` (${i18n.t("wakatimecard.lastyear")})`;
 
 /**
@@ -260,6 +260,7 @@ const renderStatsCard = (stats, options = {}) => {
     name,
     totalStars,
     totalCommits,
+    totalCommitsAllTime,
     totalIssues,
     totalPRs,
     totalPRsMerged,
@@ -341,6 +342,15 @@ const renderStatsCard = (stats, options = {}) => {
     value: totalCommits,
     id: "commits",
   };
+  if (show.includes("total_commits_all_time")) {
+    STATS.total_commits_all_time = {
+      icon: icons.commits,
+      label: i18n.t("statcard.commits"),
+      value: totalCommitsAllTime,
+      id: "total_commits_all_time",
+    };
+  }
+
   STATS.prs = {
     icon: icons.prs,
     label: i18n.t("statcard.prs"),

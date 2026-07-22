@@ -31,6 +31,7 @@ export type StatsData = {
   mergedPRsPercentage: number;
   totalReviews: number;
   totalCommits: number;
+  totalCommitsAllTime?: number;
   totalIssues: number;
   totalStars: number;
   totalDiscussionsStarted: number;

@@ -129,8 +129,8 @@ const clearContributedToCache = () => {
 };
 
 /**
- * @param {string} username
- * @returns {{ value: number, exact: boolean } | null}
+ * @param {string} username GitHub username.
+ * @returns {{ value: number, exact: boolean } | null} Cached value, or null.
  */
 const readContributedToCache = (username) => {
   const key = username.toLowerCase();
@@ -146,9 +146,9 @@ const readContributedToCache = (username) => {
 };
 
 /**
- * @param {string} username
- * @param {number} value
- * @param {boolean} exact
+ * @param {string} username GitHub username.
+ * @param {number} value Contributed repository count.
+ * @param {boolean} exact Whether the count is exact.
  */
 const writeContributedToCache = (username, value, exact) => {
   contributedToCache.set(username.toLowerCase(), {
@@ -179,9 +179,9 @@ const fetcher = (variables, token) => {
 };
 
 /**
- * @param {object} variables
- * @param {string} token
- * @returns {Promise<import('axios').AxiosResponse>}
+ * @param {object} variables Fetcher variables.
+ * @param {string} token GitHub token.
+ * @returns {Promise<import('axios').AxiosResponse>} Axios response.
  */
 const contributedToExactFetcher = (variables, token) =>
   request(
@@ -193,9 +193,9 @@ const contributedToExactFetcher = (variables, token) =>
   );
 
 /**
- * @param {object} variables
- * @param {string} token
- * @returns {Promise<import('axios').AxiosResponse>}
+ * @param {object} variables Fetcher variables.
+ * @param {string} token GitHub token.
+ * @returns {Promise<import('axios').AxiosResponse>} Axios response.
  */
 const contributedToFallbackFetcher = (variables, token) =>
   request(
@@ -211,8 +211,8 @@ const contributedToFallbackFetcher = (variables, token) =>
  * Prefer exact GraphQL totalCount; on RESOURCE_LIMITS_EXCEEDED use cache then
  * year-scoped commit-repo count.
  *
- * @param {string} username
- * @returns {Promise<number>}
+ * @param {string} username GitHub username.
+ * @returns {Promise<number>} Contributed repository count.
  */
 const fetchContributedToCount = async (username) => {
   const cached = readContributedToCache(username);
@@ -396,6 +396,7 @@ const totalCommitsFetcher = async (username, year) => {
  * @param {boolean} include_discussions Include discussions.
  * @param {boolean} include_discussions_answers Include discussions answers.
  * @param {number|undefined} commits_year Year to count total commits
+ * @param {boolean} include_total_commits_all_time Include all-time commit count
  * @returns {Promise<import("./types").StatsData>} Stats data.
  */
 const fetchStats = async (
@@ -406,6 +407,7 @@ const fetchStats = async (
   include_discussions = false,
   include_discussions_answers = false,
   commits_year,
+  include_total_commits_all_time = false,
 ) => {
   if (!username) {
     throw new MissingParamError(["username"]);
@@ -469,6 +471,13 @@ const fetchStats = async (
   } else {
     // Use GraphQL contributions (personal repos only, but respects time range)
     stats.totalCommits = user.commits.totalCommitContributions;
+  }
+
+  if (include_total_commits_all_time) {
+    stats.totalCommitsAllTime =
+      include_all_commits && !commits_year
+        ? stats.totalCommits
+        : await totalCommitsFetcher(username);
   }
 
   stats.totalPRs = user.pullRequests.totalCount;
