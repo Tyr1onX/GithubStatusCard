@@ -53,7 +53,7 @@ class Card {
     this.animations = true;
     this.a11yTitle = "";
     this.a11yDesc = "";
-    this.useExtendedViewBox = true;
+    this.useExtendedViewBox = false;
   }
 
   /**
@@ -207,9 +207,75 @@ class Card {
    * @returns {string} The rendered card.
    */
   render(body) {
-    const viewBoxPadding = this.useExtendedViewBox ? 60 : 0;
-    const verticalOffset = this.useExtendedViewBox ? 5 : 0;
-    const bottomPadding = this.useExtendedViewBox ? 10 : 0;
+    if (!this.useExtendedViewBox) {
+      return `
+      <svg
+        width="${this.width}"
+        height="${this.height}"
+        viewBox="0 0 ${this.width} ${this.height}"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+        role="img"
+        aria-labelledby="descId"
+      >
+        <title id="titleId">${this.a11yTitle}</title>
+        <desc id="descId">${this.a11yDesc}</desc>
+        <style>
+          .header {
+            font: 600 18px 'Segoe UI', Ubuntu, Sans-Serif;
+            fill: ${this.colors.titleColor};
+            animation: fadeInAnimation 0.8s ease-in-out forwards;
+          }
+          @supports(-moz-appearance: auto) {
+            /* Selector detects Firefox */
+            .header { font-size: 15.5px; }
+          }
+          ${this.css}
+
+          ${process.env.NODE_ENV === "test" ? "" : this.getAnimations()}
+          ${
+            this.animations === false
+              ? `* { animation-duration: 0s !important; animation-delay: 0s !important; }`
+              : ""
+          }
+        </style>
+
+        ${this.renderGradient()}
+
+        <rect
+          data-testid="card-bg"
+          x="0.5"
+          y="0.5"
+          rx="${this.border_radius}"
+          height="99%"
+          stroke="${this.colors.borderColor}"
+          width="${this.width - 1}"
+          fill="${
+            typeof this.colors.bgColor === "object"
+              ? "url(#gradient)"
+              : this.colors.bgColor
+          }"
+          stroke-opacity="${this.hideBorder ? 0 : 1}"
+        />
+
+        ${this.hideTitle ? "" : this.renderTitle()}
+
+        <g
+          data-testid="main-card-body"
+          transform="translate(0, ${
+            this.hideTitle ? this.paddingX : this.paddingY + 20
+          })"
+        >
+          ${body}
+        </g>
+      </svg>
+    `;
+    }
+
+    const viewBoxPadding = 60;
+    const verticalOffset = 5;
+    const bottomPadding = 10;
+
     return `
       <svg
         width="${this.width + viewBoxPadding * 2}"
@@ -245,7 +311,6 @@ class Card {
         ${this.renderGradient()}
 
         <g transform="translate(0, ${verticalOffset})">
-          ${this.useExtendedViewBox ? "" : `<rect x="0" y="0" width="${this.width}" height="${this.height}" fill="${typeof this.colors.bgColor === "object" ? "url(#gradient)" : this.colors.bgColor}" />`}
           <rect
             data-testid="card-bg"
             x="0.5"

@@ -102,7 +102,7 @@ const faker = (query, data) => {
     setHeader: jest.fn(),
     send: jest.fn(),
   };
-  mock.onPost("https://api.github.com/graphql").replyOnce(200, data);
+  mock.onPost("https://api.github.com/graphql").reply(200, data);
 
   return { req, res };
 };
