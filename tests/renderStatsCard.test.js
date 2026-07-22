@@ -58,6 +58,24 @@ describe("Test renderStatsCard", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("should render selected-year and all-time commits together", () => {
+    document.body.innerHTML = renderStatsCard(
+      { ...stats, totalCommitsAllTime: 1234 },
+      {
+        commits_year: 2026,
+        include_all_commits: true,
+        show: ["total_commits_all_time"],
+        hide_xiaohei: true,
+      },
+    );
+
+    expect(getByTestId(document.body, "commits").textContent).toBe("200");
+    expect(
+      getByTestId(document.body, "total_commits_all_time").textContent,
+    ).toBe("1.2k");
+    expect(document.body.textContent).toContain("Total Commits (2026)");
+  });
+
   it("should extend the canvas when xiaohei is visible", () => {
     document.body.innerHTML = renderStatsCard(stats);
 
@@ -426,7 +444,7 @@ describe("Test renderStatsCard", () => {
       document.querySelector(
         'g[transform="translate(0, 100)"]>.stagger>.stat.bold',
       ).textContent,
-    ).toMatchInlineSnapshot(`"贡献的项目数（去年）:"`);
+    ).toMatchInlineSnapshot(`"累计贡献的项目数:"`);
   });
 
   it("should render without rounding", () => {

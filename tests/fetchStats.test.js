@@ -3,10 +3,7 @@ import "@testing-library/jest-dom";
 import axios from "axios";
 import MockAdapter from "axios-mock-adapter";
 import { calculateRank } from "../src/calculateRank.js";
-import {
-  clearContributedToCache,
-  fetchStats,
-} from "../src/fetchers/stats.js";
+import { clearContributedToCache, fetchStats } from "../src/fetchers/stats.js";
 
 // Test parameters.
 const data_stats = {
@@ -191,6 +188,24 @@ describe("Test fetchStats", () => {
     });
   });
 
+  it("should fetch selected-year and all-time commits together", async () => {
+    mock.onGet(/\/search\/commits/).reply(200, { total_count: 1000 });
+
+    const stats = await fetchStats(
+      "anuraghazra",
+      false,
+      [],
+      false,
+      false,
+      false,
+      2026,
+      true,
+    );
+
+    expect(stats.totalCommits).toBe(100);
+    expect(stats.totalCommitsAllTime).toBe(1000);
+  });
+
   it("should stop fetching when there are repos with zero stars", async () => {
     mock.reset();
     clearContributedToCache();
@@ -363,7 +378,9 @@ describe("Test fetchStats", () => {
     mock.reset();
     clearContributedToCache();
     mock.onPost("https://api.github.com/graphql").reply(200, data_stats);
-    mock.onGet(/\/search\/commits/).reply(200, { error: "Some test error message" });
+    mock
+      .onGet(/\/search\/commits/)
+      .reply(200, { error: "Some test error message" });
 
     await expect(fetchStats("anuraghazra", true)).rejects.toThrow(
       "Could not fetch total commits.",
