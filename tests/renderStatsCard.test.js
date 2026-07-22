@@ -27,7 +27,7 @@ const stats = {
 
 describe("Test renderStatsCard", () => {
   it("should render correctly", () => {
-    document.body.innerHTML = renderStatsCard(stats);
+    document.body.innerHTML = renderStatsCard(stats, { hide_xiaohei: true });
 
     expect(document.getElementsByClassName("header")[0].textContent).toBe(
       "Anurag Hazra's GitHub Stats",
@@ -58,6 +58,19 @@ describe("Test renderStatsCard", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("should extend the canvas when xiaohei is visible", () => {
+    document.body.innerHTML = renderStatsCard(stats);
+
+    const svg = document.querySelector("svg");
+
+    expect(svg).toHaveAttribute("width", "570");
+    expect(svg).toHaveAttribute("height", "270");
+    expect(svg).toHaveAttribute("viewBox", "-60 -60 570 270");
+    expect(
+      document.querySelector('image[href^="data:image/webp;base64,"]'),
+    ).toBeInTheDocument();
+  });
+
   it("should have proper name apostrophe", () => {
     document.body.innerHTML = renderStatsCard({ ...stats, name: "Anil Das" });
 
@@ -74,6 +87,7 @@ describe("Test renderStatsCard", () => {
 
   it("should hide individual stats", () => {
     document.body.innerHTML = renderStatsCard(stats, {
+      hide_xiaohei: true,
       hide: ["issues", "prs", "contribs"],
     });
 
@@ -95,6 +109,7 @@ describe("Test renderStatsCard", () => {
 
   it("should show additional stats", () => {
     document.body.innerHTML = renderStatsCard(stats, {
+      hide_xiaohei: true,
       show: [
         "reviews",
         "discussions_started",
@@ -127,19 +142,26 @@ describe("Test renderStatsCard", () => {
   });
 
   it("should render with custom width set", () => {
-    document.body.innerHTML = renderStatsCard(stats);
+    document.body.innerHTML = renderStatsCard(stats, { hide_xiaohei: true });
     expect(document.querySelector("svg")).toHaveAttribute("width", "450");
 
-    document.body.innerHTML = renderStatsCard(stats, { card_width: 500 });
+    document.body.innerHTML = renderStatsCard(stats, {
+      card_width: 500,
+      hide_xiaohei: true,
+    });
     expect(document.querySelector("svg")).toHaveAttribute("width", "500");
   });
 
   it("should render with custom width set and limit minimum width", () => {
-    document.body.innerHTML = renderStatsCard(stats, { card_width: 1 });
+    document.body.innerHTML = renderStatsCard(stats, {
+      card_width: 1,
+      hide_xiaohei: true,
+    });
     expect(document.querySelector("svg")).toHaveAttribute("width", "420");
 
     // Test default minimum card width without rank circle.
     document.body.innerHTML = renderStatsCard(stats, {
+      hide_xiaohei: true,
       card_width: 1,
       hide_rank: true,
     });
@@ -150,6 +172,7 @@ describe("Test renderStatsCard", () => {
 
     // Test minimum card width with rank and icons.
     document.body.innerHTML = renderStatsCard(stats, {
+      hide_xiaohei: true,
       card_width: 1,
       hide_rank: true,
       show_icons: true,
@@ -161,6 +184,7 @@ describe("Test renderStatsCard", () => {
 
     // Test minimum card width with icons but without rank.
     document.body.innerHTML = renderStatsCard(stats, {
+      hide_xiaohei: true,
       card_width: 1,
       hide_rank: false,
       show_icons: true,
@@ -169,6 +193,7 @@ describe("Test renderStatsCard", () => {
 
     // Test minimum card width without icons or rank.
     document.body.innerHTML = renderStatsCard(stats, {
+      hide_xiaohei: true,
       card_width: 1,
       hide_rank: false,
       show_icons: false,
@@ -351,6 +376,7 @@ describe("Test renderStatsCard", () => {
 
   it("should auto resize if hide_rank is true", () => {
     document.body.innerHTML = renderStatsCard(stats, {
+      hide_xiaohei: true,
       hide_rank: true,
     });
 
@@ -361,6 +387,7 @@ describe("Test renderStatsCard", () => {
 
   it("should auto resize if hide_rank is true & custom_title is set", () => {
     document.body.innerHTML = renderStatsCard(stats, {
+      hide_xiaohei: true,
       hide_rank: true,
       custom_title: "Hello world",
     });

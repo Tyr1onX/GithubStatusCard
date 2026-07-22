@@ -524,9 +524,7 @@ const renderStatsCard = (stats, options = {}) => {
   card.setHideTitle(hide_title);
   card.setCSS(cssStyles);
 
-  if (hide_xiaohei) {
-    card.useExtendedViewBox = false;
-  }
+  card.useExtendedViewBox = !hide_xiaohei;
 
   if (disable_animations) {
     card.disableAnimations();
@@ -595,20 +593,67 @@ const renderStatsCard = (stats, options = {}) => {
   let xiaoheiElement = "";
   if (!hide_xiaohei) {
     const xiaoheiImage = getXiaoheiImage();
-    const isDarkTheme = theme && [
-      "dark", "radical", "merko", "gruvbox", "tokyonight", "onedark", 
-      "cobalt", "synthwave", "highcontrast", "dracula", "prussian",
-      "monokai", "vue", "vue-dark", "shades-of-purple", "nightowl",
-      "buefy", "blue-green", "algolia", "great-gatsby", "darcula",
-      "bear", "solarized-dark", "solarized-light", "chartreuse-dark",
-      "nord", "gotham", "material-palenight", "graywhite", "vision-friendly-dark",
-      "ayu-mirage", "midnight-purple", "calm", "flag-india", "omni",
-      "react", "jolly", "maroongold", "yeblu", "blueberry",
-      "slateorange", "kacho_ga", "outrun", "ocean_dark", "city_lights",
-      "github_dark", "discord_old_blurple", "aura_dark", "panda",
-      "noctis_minimus", "cobalt2", "swift", "aura", "apprentice",
-      "moltack", "codeSTACKr", "rose_pine"
-    ].includes(theme.toLowerCase());
+    const isDarkTheme =
+      theme &&
+      [
+        "dark",
+        "radical",
+        "merko",
+        "gruvbox",
+        "tokyonight",
+        "onedark",
+        "cobalt",
+        "synthwave",
+        "highcontrast",
+        "dracula",
+        "prussian",
+        "monokai",
+        "vue",
+        "vue-dark",
+        "shades-of-purple",
+        "nightowl",
+        "buefy",
+        "blue-green",
+        "algolia",
+        "great-gatsby",
+        "darcula",
+        "bear",
+        "solarized-dark",
+        "solarized-light",
+        "chartreuse-dark",
+        "nord",
+        "gotham",
+        "material-palenight",
+        "graywhite",
+        "vision-friendly-dark",
+        "ayu-mirage",
+        "midnight-purple",
+        "calm",
+        "flag-india",
+        "omni",
+        "react",
+        "jolly",
+        "maroongold",
+        "yeblu",
+        "blueberry",
+        "slateorange",
+        "kacho_ga",
+        "outrun",
+        "ocean_dark",
+        "city_lights",
+        "github_dark",
+        "discord_old_blurple",
+        "aura_dark",
+        "panda",
+        "noctis_minimus",
+        "cobalt2",
+        "swift",
+        "aura",
+        "apprentice",
+        "moltack",
+        "codeSTACKr",
+        "rose_pine",
+      ].includes(theme.toLowerCase());
     const xiaoheiYPos = isDarkTheme ? "-121" : "-123";
     xiaoheiElement = xiaoheiImage
       ? `<image 
